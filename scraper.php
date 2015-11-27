@@ -6,12 +6,8 @@ date_default_timezone_set('Australia/Sydney');
 
 ## Accept Terms and return Cookies
 function accept_terms_get_cookies($terms_url) {
-    $cookie_file = "cookies.txt";
     $curl = curl_init($terms_url);
     curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($curl, CURLOPT_COOKIEJAR, $cookie_file);
-    curl_setopt($curl, CURLOPT_COOKIEFILE, $cookie_file);
-
     $terms_response = curl_exec($curl);
     curl_close($curl);
 
@@ -68,7 +64,7 @@ function buildformdata($dom, $eventtarget) {
 $url_base = "http://da.manly.nsw.gov.au/MasterViewUI/Modules/Applicationmaster/";
 $da_page = $url_base . "default.aspx?page=found&1=thisweek&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";
 $da_page = $url_base . "default.aspx?page=found&1=thismonth&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";        # Use this URL to get 'This Month' submitted DA, also to test pagination
-$da_page = $url_base . "default.aspx?page=found&1=lastmonth&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";        # Use this URL to get 'Last Month' submitted DA, also to test pagination
+#$da_page = $url_base . "default.aspx?page=found&1=lastmonth&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";        # Use this URL to get 'Last Month' submitted DA, also to test pagination
 $comment_base = "mailto:records@manly.nsw.gov.au?subject=Development Application Enquiry: ";
 
 $cookies = accept_terms_get_cookies($url_base . "default.aspx");
