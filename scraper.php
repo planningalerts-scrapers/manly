@@ -61,10 +61,27 @@ function buildformdata($dom, $eventtarget) {
 }
 
 
+###
+### Main code start here
+###
 $url_base = "http://da.manly.nsw.gov.au/MasterViewUI/Modules/Applicationmaster/";
-#$da_page = $url_base . "default.aspx?page=found&1=thisweek&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";
-$da_page = $url_base . "default.aspx?page=found&1=thismonth&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";        # Use this URL to get 'This Month' submitted DA, also to test pagination
-#$da_page = $url_base . "default.aspx?page=found&1=lastmonth&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";        # Use this URL to get 'Last Month' submitted DA, also to test pagination
+
+    # Default to 'thisweek', use MORPH_PERIOD to change to 'thismonth' or 'lastmonth' for data recovery
+    switch(getenv('MORPH_PERIOD')) {
+        case 'thismonth' :
+            $period = 'thismonth';
+            break;
+        case 'lastmonth' :
+            $period = 'lastmonth';
+            break;    
+        case ''         :
+        case 'thisweek' :
+        default         :
+            $period = 'thisweek';
+            break;
+    }
+
+$da_page = $url_base . "default.aspx?page=found&1=" .$period. "&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";
 $comment_base = "mailto:records@manly.nsw.gov.au?subject=Development Application Enquiry: ";
 
 $cookies = accept_terms_get_cookies($url_base . "default.aspx");
@@ -106,16 +123,29 @@ for ($i = 1; $i <= $NumPages; $i++) {
         $date_received = explode('/', $date_received[0]);
         $date_received = "$date_received[2]-$date_received[1]-$date_received[0]";
 
+        # request the actual DA page to get full description, also tidy up the text to the best I can
+        $request = array(
+            'http'    => array(
+            'method'  => "GET",
+            'header'  => "Accept-language: en\r\n" .
+                         "Cookie: ASP.NET_SessionId=" .$cookies['ASP_NET_SessionId']. "; path=/; HttpOnly\r\n"));
+        $context = stream_context_create($request);        
+        $dahtml  = file_get_html($url_base . trim($record->find('a',0)->href), false, $context);
+        $desc    = $dahtml->find('DIV[id=lblDetail] table[width=98%]',0)->children(3)->children(1)->innertext;
+        $desc    = mb_convert_encoding($desc, 'ASCII');
+        $desc    = str_replace(' ? ', ' - ', $desc);
+        $desc    = trim(preg_replace('/\s+/', ' ', $desc));
+       
         # Prep a bit more, ready to add these to the array
         $tempstr = explode('<br/>', $record->children(3)->innertext);
         
         # Put all information in an array
         $application = array (
             'council_reference' => trim($record->children(1)->plaintext),
-            'address'           => preg_replace('/\s+/', ' ', $tempstr[0]) . ", " .trim($record->children(4)->plaintext). ", NSW  AUSTRALIA",
-            'description'       => preg_replace('/\s+/', ' ', $tempstr[1]),
+            'address'           => preg_replace('/\s+/', ' ', $tempstr[0]) . ", " .trim($record->children(4)->plaintext). ", NSW, Australia",
+            'description'       => $desc,
             'info_url'          => $url_base . trim($record->find('a',0)->href),
-            'comment_url'       => $comment_base . trim($record->children(1)->plaintext) . '&Body=',
+            'comment_url'       => $comment_base . trim($record->children(1)->plaintext),
             'date_scraped'      => date('Y-m-d'),
             'date_received'     => date('Y-m-d', strtotime($date_received))
         );
