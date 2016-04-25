@@ -131,11 +131,15 @@ for ($i = 1; $i <= $NumPages; $i++) {
                          "Cookie: ASP.NET_SessionId=" .$cookies['ASP_NET_SessionId']. "; path=/; HttpOnly\r\n"));
         $context = stream_context_create($request);        
         $dahtml  = file_get_html($url_base . trim($record->find('a',0)->href), false, $context);
-        $desc    = $dahtml->find('DIV[id=lblDetail] table[width=98%]',0)->children(3)->children(1)->innertext;
-        $desc    = mb_convert_encoding($desc, 'ASCII');
-        $desc    = str_replace(' ? ', ' - ', $desc);
-        $desc    = trim(preg_replace('/\s+/', ' ', $desc));
-       
+
+        $table   = $dahtml->find('DIV[id=lblDetail] table[width=98%]',0);
+        $desc    = "";
+        if ($table) {
+            $desc    = $table->children(3)->children(1)->innertext;
+            $desc    = mb_convert_encoding($desc, 'ASCII');
+            $desc    = str_replace(' ? ', ' - ', $desc);
+            $desc    = trim(preg_replace('/\s+/', ' ', $desc));
+        }
         # Prep a bit more, ready to add these to the array
         $tempstr = explode('<br/>', $record->children(3)->innertext);
         
