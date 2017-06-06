@@ -1,98 +1,40 @@
 <?php
-# Manly Council scraper
-require 'scraperwiki.php'; 
-require 'simple_html_dom.php';
+require_once 'vendor/autoload.php';
+require_once 'vendor/openaustralia/scraperwiki/scraperwiki.php';
+
+use PGuardiario\PGBrowser;
+use Sunra\PhpSimple\HtmlDomParser;
+
 date_default_timezone_set('Australia/Sydney');
 
-## Accept Terms and return Cookies
-function accept_terms_get_cookies($terms_url) {
-    $curl = curl_init($terms_url);
-    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-    $terms_response = curl_exec($curl);
-    curl_close($curl);
-
-    preg_match('/<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="(.*)" \/>/', $terms_response, $viewstate_matches);
-    $viewstate = $viewstate_matches[1];
-
-    preg_match('/<input type="hidden" name="__EVENTVALIDATION" id="__EVENTVALIDATION" value="(.*)" \/>/', $terms_response, $eventvalidation_matches);
-    $eventvalidation = $eventvalidation_matches[1];
-
-    $postfields = array();
-    $postfields['__VIEWSTATE'] = $viewstate;
-    $postfields['__EVENTVALIDATION'] = $eventvalidation;
-    $postfields['ctl00$cphContent$ctl01$Button1'] = 'Agree';
-
-    $curl = curl_init($terms_url);
-    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($curl, CURLOPT_POST, 1);
-    curl_setopt($curl, CURLOPT_POSTFIELDS, $postfields);
-    curl_setopt($curl, CURLOPT_HEADER, TRUE);
-    $terms_response = curl_exec($curl);
-    curl_close($curl);
-    // get cookie
-    // Please imporve it, I am not regex expert, this code changed ASP.NET_SessionId cookie
-    // to ASP_NET_SessionId and Path, HttpOnly are missing etc
-    // Example Source - Cookie: ASP.NET_SessionId=bz3jprrptbflxgzwes3mtse4; path=/; HttpOnly
-    // Stored in array - ASP_NET_SessionId => bz3jprrptbflxgzwes3mtse4
-    preg_match_all('/^Set-Cookie:\s*([^;]*)/mi', $terms_response, $matches);
-    $cookies = array();
-    foreach($matches[1] as $item) {
-        parse_str($item, $cookie);
-        $cookies = array_merge($cookies, $cookie);
-    }
-    return $cookies;
+# Default to 'thisweek', use MORPH_PERIOD to change to 'thismonth' or 'lastmonth' for data recovery
+switch(getenv('MORPH_PERIOD')) {
+    case 'thismonth' :
+        $period = 'thismonth';
+        break;
+    case 'lastmonth' :
+        $period = 'lastmonth';
+        break;
+    default         :
+        $period = 'thisweek';
+        break;
 }
+print "Getting data for `" .$period. "`, changable via MORPH_PERIOD environment\n";
 
-### Collect all 'hidden' inputs, plus add the current $eventtarget
-### $eventtarget is coming from the 'pages' section of the HTML
-function buildformdata($dom, $eventtarget) {
-    $a = array();
-    foreach ($dom->find("input[type=hidden]") as $input) {
-        if ($input->value === FALSE) {
-            $a = array_merge($a, array($input->name => ""));
-        } else {
-            $a = array_merge($a, array($input->name => $input->value));
-        }
-    }
-    $a = array_merge($a, array('__EVENTTARGET' => $eventtarget));
-    $a = array_merge($a, array('__EVENTARGUMENT' => ''));
-    
-    return $a;
-}
-
-
-###
-### Main code start here
-###
 $url_base = "http://da.manly.nsw.gov.au/MasterViewUI/Modules/Applicationmaster/";
-
-    # Default to 'thisweek', use MORPH_PERIOD to change to 'thismonth' or 'lastmonth' for data recovery
-    switch(getenv('MORPH_PERIOD')) {
-        case 'thismonth' :
-            $period = 'thismonth';
-            break;
-        case 'lastmonth' :
-            $period = 'lastmonth';
-            break;    
-        case ''         :
-        case 'thisweek' :
-        default         :
-            $period = 'thisweek';
-            break;
-    }
-
 $da_page = $url_base . "default.aspx?page=found&1=" .$period. "&4a=5,6,7,10,11,12,13,14,15,16,17,20&6=F";
 $comment_base = "mailto:records@manly.nsw.gov.au?subject=Development Application Enquiry: ";
 
-$cookies = accept_terms_get_cookies($url_base . "default.aspx");
+# Agreed Terms
+$browser = new PGBrowser();
+$page = $browser->get($url_base . "default.aspx");
+$form = $page->form();
+$form->set('ctl00$cphContent$ctl01$Button1', 'Agree');
+$page = $form->submit();
 
-# Manually set cookie's key and get the value from array
-$request = array(
-    'http'    => array(
-    'header'  => "Cookie: ASP.NET_SessionId=" .$cookies['ASP_NET_SessionId']. "; path=/; HttpOnly\r\n"
-    ));
-$context = stream_context_create($request);
-$dom = file_get_html($da_page, false, $context);
+# Get DA summary page
+$page = $browser->get($da_page);
+$dom = HtmlDomParser::str_get_html($page->html);
 
 # By default, assume it is single page
 $dataset  = $dom->find("tr[class=rgRow], tr[class=rgAltRow]");
@@ -102,17 +44,10 @@ if ($NumPages === 0) { $NumPages = 1; }
 for ($i = 1; $i <= $NumPages; $i++) {
     # If more than a single page, fetch the page
     if ($NumPages > 1) {
-        $eventtarget = substr($dom->find('div[class=rgWrap rgNumPart] a',$i-1)->href, 25, 61);
-        $request = array(
-            'http'    => array(
-            'method'  => "POST",
-            'header'  => "Cookie: ASP.NET_SessionId=" .$cookies['ASP_NET_SessionId']. "; path=/; HttpOnly\r\n" .
-                         "Content-Type: application/x-www-form-urlencoded\r\n",
-            'content' => http_build_query(buildformdata($dom, $eventtarget))));
-        $context = stream_context_create($request);
-        $html = file_get_html($da_page, false, $context);
-        
-        $dataset = $html->find("tr[class=rgRow], tr[class=rgAltRow]");
+        $form = $page->form();
+        $page = $form->doPostBack($dom->find('div[class=rgWrap rgNumPart] a', $i-1)->href);
+        $dom  = HtmlDomParser::str_get_html($page->html);
+        $dataset = $dom->find("tr[class=rgRow], tr[class=rgAltRow]");
         echo "Scraping page $i of $NumPages\r\n";
     }
 
@@ -124,25 +59,22 @@ for ($i = 1; $i <= $NumPages; $i++) {
         $date_received = "$date_received[2]-$date_received[1]-$date_received[0]";
 
         # request the actual DA page to get full description, also tidy up the text to the best I can
-        $request = array(
-            'http'    => array(
-            'method'  => "GET",
-            'header'  => "Accept-language: en\r\n" .
-                         "Cookie: ASP.NET_SessionId=" .$cookies['ASP_NET_SessionId']. "; path=/; HttpOnly\r\n"));
-        $context = stream_context_create($request);        
-        $dahtml  = file_get_html($url_base . trim($record->find('a',0)->href), false, $context);
-        $desc    = $dahtml->find('DIV[id=lblDetail] table[width=98%]',0)->children(3)->children(1)->innertext;
+        $detail_page = $browser->get($url_base . trim($record->find('a',0)->href));
+        $dahtml = HtmlDomParser::str_get_html($detail_page->html);
+
+        $desc    = $dahtml->find('DIV[id=lblDetail] table[width=98%]',0)->children(3)->children(1)->plaintext;
+        $desc    = htmlspecialchars_decode($desc);
         $desc    = mb_convert_encoding($desc, 'ASCII');
         $desc    = str_replace(' ? ', ' - ', $desc);
         $desc    = trim(preg_replace('/\s+/', ' ', $desc));
-       
+
         # Prep a bit more, ready to add these to the array
         $tempstr = explode('<br/>', $record->children(3)->innertext);
-        
+
         # Put all information in an array
         $application = array (
             'council_reference' => trim($record->children(1)->plaintext),
-            'address'           => preg_replace('/\s+/', ' ', $tempstr[0]) . ", " .trim($record->children(4)->plaintext). ", NSW, Australia",
+            'address'           => preg_replace('/\s+/', ' ', $tempstr[0]) . ", " .trim($record->children(4)->plaintext). ", NSW",
             'description'       => $desc,
             'info_url'          => $url_base . trim($record->find('a',0)->href),
             'comment_url'       => $comment_base . trim($record->children(1)->plaintext),
@@ -153,8 +85,8 @@ for ($i = 1; $i <= $NumPages; $i++) {
         # Check if record exist, if not, INSERT, else do nothing
         $existingRecords = scraperwiki::select("* from data where `council_reference`='" . $application['council_reference'] . "'");
         if (count($existingRecords) == 0) {
-            print ("Saving record " . $application['council_reference'] . "\n");
-            # print_r ($application);
+            print ("Saving record " .$application['council_reference']. " - " .$application['address']. "\n");
+//             print_r ($application);
             scraperwiki::save(array('council_reference'), $application);
         } else {
             print ("Skipping already saved record " . $application['council_reference'] . "\n");
